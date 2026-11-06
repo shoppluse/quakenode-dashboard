@@ -69,8 +69,9 @@
         .metric-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
         .metric-value { font-size: 26px; font-weight: 700; color: var(--accent-green); }
         .metric-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; text-transform: capitalize; }
-        .vib-status-btn {
-            background: #ff4d4d; color: #fff; font-weight: bold; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+        .vib-btn {
+            background: #ff4d4d; color: #ffffff; font-weight: bold; padding: 10px 18px; border: none; border-radius: 8px; cursor: pointer;
+            box-shadow: 0 0 10px rgba(255, 77, 77, 0.4);
         }
         @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } #map { min-height: 300px; } }
     </style>
@@ -79,7 +80,7 @@
     <div class="header">
         <h2>Field Transmitter Station (Node 1)</h2>
         <div>
-            <button id="vib_status" class="vib-status-btn" onclick="activateVibrationHardware()">Tap Screen to Enable Mobile Vibration</button>
+            <button id="vib_btn" class="vib-btn" onclick="forceUnlockVibration()">⚠️ TAP HERE TO ENABLE PHONE VIBRATION</button>
         </div>
         <div id="alert_banner" class="alert-banner"></div>
     </div>
@@ -124,22 +125,26 @@
         L.circleMarker([nodeLat, nodeLon], { color: '#ffffff', fillColor: '#ff4d4d', fillOpacity: 1.0, radius: 7, weight: 2 }).addTo(map).bindTooltip("VVIET Node 1", { permanent: true });
 
         const canvas = document.getElementById('waveformCanvas'), ctx = canvas.getContext('2d');
-        const historyLength = 80;
+        const historyLength = 100;
         let pgaData = Array(historyLength).fill(0.0);
         let vibrationUnlocked = false;
+        let isCurrentlyAlerting = false;
+        let vibTimer = null;
 
-        function activateVibrationHardware() {
+        function forceUnlockVibration() {
             vibrationUnlocked = true;
-            if (navigator.vibrate) navigator.vibrate(200);
-            const btn = document.getElementById('vib_status');
-            btn.innerText = "Vibration Hardware Active ✓";
+            if (navigator.vibrate) {
+                navigator.vibrate([200, 100, 200]);
+            }
+            const btn = document.getElementById('vib_btn');
+            btn.innerText = "Phone Vibration Active ✓";
             btn.style.background = "#232d42";
             btn.style.color = "#00e676";
+            btn.style.boxShadow = "none";
         }
 
-        // Unlock vibration hardware on any touch anywhere on the webpage
-        window.addEventListener('touchstart', activateVibrationHardware, { once: true });
-        window.addEventListener('click', activateVibrationHardware, { once: true });
+        document.addEventListener('touchstart', () => { if (!vibrationUnlocked) forceUnlockVibration(); }, { passive: true });
+        document.addEventListener('click', () => { if (!vibrationUnlocked) forceUnlockVibration(); }, { passive: true });
 
         function resizeCanvas() { 
             canvas.width = canvas.parentElement.clientWidth; 
@@ -148,11 +153,11 @@
         window.addEventListener('resize', resizeCanvas); 
         resizeCanvas();
 
-        function drawWaveform() {
+        function renderWaveform() {
             const w = canvas.width, h = canvas.height;
             ctx.clearRect(0, 0, w, h);
 
-            // Grid Lines & Labels
+            // Grid Lines
             ctx.strokeStyle = '#232d42'; ctx.lineWidth = 1; ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif';
             for (let val = 0; val <= 10; val += 2.5) {
                 let y = h - (val / 10.0) * (h - 20) - 10;
@@ -160,18 +165,18 @@
                 ctx.fillText(val + ' m/s²', 2, y + 3);
             }
 
-            // Yellow Warning Threshold (0.8 m/s²)
+            // Warning threshold line (0.8 m/s²)
             let yYellow = h - (0.8 / 10.0) * (h - 20) - 10;
             ctx.strokeStyle = 'rgba(255, 193, 7, 0.4)'; ctx.setLineDash([4, 4]);
             ctx.beginPath(); ctx.moveTo(30, yYellow); ctx.lineTo(w, yYellow); ctx.stroke();
 
-            // Red Alert Threshold (1.8 m/s²)
+            // Critical threshold line (1.8 m/s²)
             let yRed = h - (1.8 / 10.0) * (h - 20) - 10;
             ctx.strokeStyle = 'rgba(255, 77, 77, 0.5)';
             ctx.beginPath(); ctx.moveTo(30, yRed); ctx.lineTo(w, yRed); ctx.stroke();
             ctx.setLineDash([]);
 
-            // Plot Live Dynamic Waveform
+            // Draw Live Line
             ctx.beginPath();
             let step = (w - 30) / (historyLength - 1);
             let currentPga = pgaData[pgaData.length - 1];
@@ -187,28 +192,40 @@
             ctx.strokeStyle = currentPga >= 1.8 ? '#ff4d4d' : (currentPga >= 0.8 ? '#ffc107' : '#00e676');
             ctx.lineWidth = 2.5;
             ctx.stroke();
+
+            requestAnimationFrame(renderWaveform);
+        }
+        requestAnimationFrame(renderWaveform);
+
+        function startContinuousVibration() {
+            if (vibrationUnlocked && navigator.vibrate) {
+                if (!vibTimer) {
+                    navigator.vibrate([1000, 200, 1000, 200]);
+                    vibTimer = setInterval(() => {
+                        if (navigator.vibrate) navigator.vibrate([1000, 200, 1000, 200]);
+                    }, 2400);
+                }
+            }
         }
 
-        function triggerMobileVibration() {
-            if (vibrationUnlocked && navigator.vibrate) {
-                navigator.vibrate([400, 100, 400]);
+        function stopContinuousVibration() {
+            if (vibTimer) {
+                clearInterval(vibTimer);
+                vibTimer = null;
             }
+            if (navigator.vibrate) navigator.vibrate(0);
         }
 
         function processTelemetry(data) {
             if (!data) return;
 
-            // Safe robust float parsing
-            let rawPga = data.pga !== undefined ? data.pga : 0;
-            let pga = parseFloat(rawPga);
+            let pga = parseFloat(data.pga || 0.0);
             if (isNaN(pga)) pga = 0.0;
 
             let alertActive = Boolean(data.a || data.vibration > 0 || pga >= 0.4);
 
-            // Shift array and push new value to generate active wave
             pgaData.shift();
             pgaData.push(pga);
-            drawWaveform();
 
             document.getElementById('pga_val').innerText = pga.toFixed(2) + " m/s²";
             document.getElementById('live_pga_label').innerText = pga.toFixed(2) + " m/s²";
@@ -223,34 +240,33 @@
                 document.getElementById('pga_level').style.color = '#ff4d4d';
                 impactZone.setStyle({ color: '#ff4d4d', fillColor: '#ff4d4d', fillOpacity: 0.45 }).setRadius(Math.min(30 + pga * 15, 120));
                 
-                triggerMobileVibration();
+                startContinuousVibration();
             } else if (pga >= 0.2) {
                 banner.style.display = 'none';
                 document.getElementById('pga_val').style.color = '#ffc107';
                 document.getElementById('pga_level').innerText = "MILD TREMOR";
                 document.getElementById('pga_level').style.color = '#ffc107';
                 impactZone.setStyle({ color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.3 }).setRadius(40);
+                stopContinuousVibration();
             } else {
                 banner.style.display = 'none';
                 document.getElementById('pga_val').style.color = '#00e676';
                 document.getElementById('pga_level').innerText = "Level 0: Normal / Calm";
                 document.getElementById('pga_level').style.color = '#94a3b8';
                 impactZone.setStyle({ color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2 }).setRadius(30);
+                stopContinuousVibration();
             }
 
             if (data.weather) document.getElementById('weather_val').innerText = data.weather;
             if (data.desc) document.getElementById('weather_desc').innerText = data.desc;
         }
 
-        // Fast 100ms HTTP Polling Loop
         setInterval(() => {
-            fetch(FIREBASE_URL + '?t=' + Date.now())
+            fetch(FIREBASE_URL)
                 .then(r => r.json())
                 .then(d => processTelemetry(d))
                 .catch(e => console.error(e));
-        }, 100);
-
-        drawWaveform();
+        }, 120);
     </script>
 </body>
 </html>
