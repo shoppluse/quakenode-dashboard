@@ -69,18 +69,12 @@
         .metric-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
         .metric-value { font-size: 26px; font-weight: 700; color: var(--accent-green); }
         .metric-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; text-transform: capitalize; }
-        .enable-btn {
-            background: #00e676; color: #000; font-weight: bold; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; margin-left: 10px;
-        }
         @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } #map { min-height: 300px; } }
     </style>
 </head>
 <body>
     <div class="header">
         <h2>Field Transmitter Station (Node 1)</h2>
-        <div>
-            <button id="vib_btn" class="enable-btn" onclick="enableVibration()">Tap to Enable Phone Vibration</button>
-        </div>
         <div id="alert_banner" class="alert-banner"></div>
     </div>
     <div class="dashboard-grid">
@@ -126,17 +120,18 @@
         const canvas = document.getElementById('waveformCanvas'), ctx = canvas.getContext('2d');
         const historyLength = 100;
         let pgaData = Array(historyLength).fill(0.0);
-        let vibrationAllowed = false;
+        let vibrationEnabled = false;
         let vibInterval = null;
 
-        function enableVibration() {
-            vibrationAllowed = true;
-            if (navigator.vibrate) navigator.vibrate(200);
-            const btn = document.getElementById('vib_btn');
-            btn.innerText = "Vibration Ready ✓";
-            btn.style.background = "#232d42";
-            btn.style.color = "#00e676";
-        }
+        // Automatically unlock vibration hardware on ANY touch/click anywhere on page
+        const unlockVibration = () => {
+            vibrationEnabled = true;
+            if (navigator.vibrate) navigator.vibrate(50);
+            window.removeEventListener('click', unlockVibration);
+            window.removeEventListener('touchstart', unlockVibration);
+        };
+        window.addEventListener('click', unlockVibration);
+        window.addEventListener('touchstart', unlockVibration);
 
         function resizeCanvas() { canvas.width = canvas.parentElement.clientWidth; canvas.height = canvas.parentElement.clientHeight; }
         window.addEventListener('resize', resizeCanvas); resizeCanvas();
@@ -178,13 +173,13 @@
             ctx.stroke();
         }
 
-        function handleVibration(active) {
-            if (active && vibrationAllowed && navigator.vibrate) {
+        function triggerContinuousVibration(shouldVibrate) {
+            if (shouldVibrate && vibrationEnabled && navigator.vibrate) {
                 if (!vibInterval) {
-                    navigator.vibrate([1000, 300, 1000, 300]);
+                    navigator.vibrate([1000, 200, 1000, 200]);
                     vibInterval = setInterval(() => {
-                        navigator.vibrate([1000, 300, 1000, 300]);
-                    }, 2600);
+                        if (navigator.vibrate) navigator.vibrate([1000, 200, 1000, 200]);
+                    }, 2400);
                 }
             } else {
                 if (vibInterval) {
@@ -195,56 +190,57 @@
             }
         }
 
-        function pollData() {
-            fetch(FIREBASE_URL)
-                .then(res => res.json())
-                .then(data => {
-                    if (!data) return;
+        function updateDashboard(data) {
+            if (!data) return;
 
-                    let pga = parseFloat(data.pga || 0.0);
-                    let alertActive = Boolean(data.a || pga > 1.8);
+            let pga = parseFloat(data.pga || 0.0);
+            let alertActive = Boolean(data.a || data.vibration > 0 || pga > 1.8);
 
-                    pgaData.shift();
-                    pgaData.push(pga);
-                    drawWaveform();
+            pgaData.shift();
+            pgaData.push(pga);
+            drawWaveform();
 
-                    document.getElementById('pga_val').innerText = pga.toFixed(2) + " m/s²";
-                    document.getElementById('live_pga_label').innerText = pga.toFixed(2) + " m/s²";
+            document.getElementById('pga_val').innerText = pga.toFixed(2) + " m/s²";
+            document.getElementById('live_pga_label').innerText = pga.toFixed(2) + " m/s²";
 
-                    const banner = document.getElementById('alert_banner');
+            const banner = document.getElementById('alert_banner');
 
-                    if (alertActive) {
-                        banner.style.display = 'block';
-                        banner.innerText = `EARTHQUAKE ALERT! (${data.source || 'TREMOR DETECTED'})`;
-                        document.getElementById('pga_val').style.color = '#ff4d4d';
-                        document.getElementById('pga_level').innerText = "CRITICAL SHAKING";
-                        document.getElementById('pga_level').style.color = '#ff4d4d';
-                        impactZone.setStyle({ color: '#ff4d4d', fillColor: '#ff4d4d', fillOpacity: 0.45 }).setRadius(Math.min(30 + pga * 15, 120));
-                        handleVibration(true);
-                    } else if (pga >= 0.8) {
-                        banner.style.display = 'none';
-                        document.getElementById('pga_val').style.color = '#ffc107';
-                        document.getElementById('pga_level').innerText = "MILD TREMOR";
-                        document.getElementById('pga_level').style.color = '#ffc107';
-                        impactZone.setStyle({ color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.3 }).setRadius(40);
-                        handleVibration(false);
-                    } else {
-                        banner.style.display = 'none';
-                        document.getElementById('pga_val').style.color = '#00e676';
-                        document.getElementById('pga_level').innerText = "Level 0: Normal / Calm";
-                        document.getElementById('pga_level').style.color = '#94a3b8';
-                        impactZone.setStyle({ color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2 }).setRadius(30);
-                        handleVibration(false);
-                    }
+            if (alertActive) {
+                banner.style.display = 'block';
+                banner.innerText = `EARTHQUAKE ALERT! (${data.source || 'TREMOR DETECTED'})`;
+                document.getElementById('pga_val').style.color = '#ff4d4d';
+                document.getElementById('pga_level').innerText = "CRITICAL SHAKING";
+                document.getElementById('pga_level').style.color = '#ff4d4d';
+                impactZone.setStyle({ color: '#ff4d4d', fillColor: '#ff4d4d', fillOpacity: 0.45 }).setRadius(Math.min(30 + pga * 15, 120));
+                triggerContinuousVibration(true);
+            } else if (pga >= 0.8) {
+                banner.style.display = 'none';
+                document.getElementById('pga_val').style.color = '#ffc107';
+                document.getElementById('pga_level').innerText = "MILD TREMOR";
+                document.getElementById('pga_level').style.color = '#ffc107';
+                impactZone.setStyle({ color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.3 }).setRadius(40);
+                triggerContinuousVibration(false);
+            } else {
+                banner.style.display = 'none';
+                document.getElementById('pga_val').style.color = '#00e676';
+                document.getElementById('pga_level').innerText = "Level 0: Normal / Calm";
+                document.getElementById('pga_level').style.color = '#94a3b8';
+                impactZone.setStyle({ color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2 }).setRadius(30);
+                triggerContinuousVibration(false);
+            }
 
-                    if (data.weather) document.getElementById('weather_val').innerText = data.weather;
-                    if (data.desc) document.getElementById('weather_desc').innerText = data.desc;
-                })
-                .catch(err => console.error(err));
+            if (data.weather) document.getElementById('weather_val').innerText = data.weather;
+            if (data.desc) document.getElementById('weather_desc').innerText = data.desc;
         }
 
-        // Fast 100ms Polling Loop
-        setInterval(pollData, 100);
+        // Fetch telemetry every 150ms
+        setInterval(() => {
+            fetch(FIREBASE_URL)
+                .then(r => r.json())
+                .then(d => updateDashboard(d))
+                .catch(e => console.error(e));
+        }, 150);
+
         drawWaveform();
     </script>
 </body>
