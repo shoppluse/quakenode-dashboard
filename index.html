@@ -80,7 +80,7 @@
     <div class="header">
         <h2>Field Transmitter Station (Node 1)</h2>
         <div>
-            <button id="vib_btn" class="vib-btn" onclick="forceUnlockVibration()">⚠️ TAP HERE TO ENABLE PHONE VIBRATION</button>
+            <button id="vib_btn" class="vib-btn" onclick="forceUnlockVibration()">TAP HERE TO ENABLE PHONE VIBRATION</button>
         </div>
         <div id="alert_banner" class="alert-banner"></div>
     </div>
@@ -168,18 +168,18 @@
                 ctx.fillText(val + ' m/s²', 2, y + 3);
             }
 
-            // Yellow Warning line (0.8 m/s²)
+            // Warning line (0.8 m/s²)
             let yYellow = h - (0.8 / 10.0) * (h - 20) - 10;
             ctx.strokeStyle = 'rgba(255, 193, 7, 0.4)'; ctx.setLineDash([4, 4]);
             ctx.beginPath(); ctx.moveTo(35, yYellow); ctx.lineTo(w, yYellow); ctx.stroke();
 
-            // Red Alert line (1.8 m/s²)
+            // Critical Alert line (1.8 m/s²)
             let yRed = h - (1.8 / 10.0) * (h - 20) - 10;
             ctx.strokeStyle = 'rgba(255, 77, 77, 0.5)';
             ctx.beginPath(); ctx.moveTo(35, yRed); ctx.lineTo(w, yRed); ctx.stroke();
             ctx.setLineDash([]);
 
-            // Plot Waveform
+            // Plot Live Waveform Points
             ctx.beginPath();
             let step = (w - 35) / (historyLength - 1);
             let currentPga = pgaData[pgaData.length - 1];
@@ -225,7 +225,7 @@
             let pga = parseFloat(data.pga || 0.0);
             if (isNaN(pga)) pga = 0.0;
 
-            let alertActive = Boolean(data.a || data.vibration > 0 || pga >= 0.4);
+            let alertActive = Boolean(data.a || data.vibration > 0 || pga >= 0.3);
 
             pgaData.shift();
             pgaData.push(pga);
@@ -244,7 +244,7 @@
                 impactZone.setStyle({ color: '#ff4d4d', fillColor: '#ff4d4d', fillOpacity: 0.45 }).setRadius(Math.min(30 + pga * 15, 120));
                 
                 startContinuousVibration();
-            } else if (pga >= 0.2) {
+            } else if (pga >= 0.15) {
                 banner.style.display = 'none';
                 document.getElementById('pga_val').style.color = '#ffc107';
                 document.getElementById('pga_level').innerText = "MILD TREMOR";
