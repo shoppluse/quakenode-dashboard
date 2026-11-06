@@ -69,12 +69,18 @@
         .metric-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
         .metric-value { font-size: 26px; font-weight: 700; color: var(--accent-green); }
         .metric-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; text-transform: capitalize; }
+        .vib-status-btn {
+            background: #ff4d4d; color: #fff; font-weight: bold; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+        }
         @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } #map { min-height: 300px; } }
     </style>
 </head>
 <body>
     <div class="header">
         <h2>Field Transmitter Station (Node 1)</h2>
+        <div>
+            <button id="vib_status" class="vib-status-btn" onclick="activateVibrationHardware()">Tap Screen to Enable Mobile Vibration</button>
+        </div>
         <div id="alert_banner" class="alert-banner"></div>
     </div>
     <div class="dashboard-grid">
@@ -118,31 +124,35 @@
         L.circleMarker([nodeLat, nodeLon], { color: '#ffffff', fillColor: '#ff4d4d', fillOpacity: 1.0, radius: 7, weight: 2 }).addTo(map).bindTooltip("VVIET Node 1", { permanent: true });
 
         const canvas = document.getElementById('waveformCanvas'), ctx = canvas.getContext('2d');
-        const historyLength = 100;
+        const historyLength = 80;
         let pgaData = Array(historyLength).fill(0.0);
-        let swRegistration = null;
-        let lastAlertState = false;
-        let vibInterval = null;
+        let vibrationUnlocked = false;
 
-        // Register Service Worker & Ask for Background Notification Permissions
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-                .then(reg => {
-                    swRegistration = reg;
-                    if (Notification.permission !== 'granted') {
-                        Notification.requestPermission();
-                    }
-                })
-                .catch(err => console.error("SW registration failed:", err));
+        function activateVibrationHardware() {
+            vibrationUnlocked = true;
+            if (navigator.vibrate) navigator.vibrate(200);
+            const btn = document.getElementById('vib_status');
+            btn.innerText = "Vibration Hardware Active ✓";
+            btn.style.background = "#232d42";
+            btn.style.color = "#00e676";
         }
 
-        function resizeCanvas() { canvas.width = canvas.parentElement.clientWidth; canvas.height = canvas.parentElement.clientHeight; }
-        window.addEventListener('resize', resizeCanvas); resizeCanvas();
+        // Unlock vibration hardware on any touch anywhere on the webpage
+        window.addEventListener('touchstart', activateVibrationHardware, { once: true });
+        window.addEventListener('click', activateVibrationHardware, { once: true });
+
+        function resizeCanvas() { 
+            canvas.width = canvas.parentElement.clientWidth; 
+            canvas.height = canvas.parentElement.clientHeight; 
+        }
+        window.addEventListener('resize', resizeCanvas); 
+        resizeCanvas();
 
         function drawWaveform() {
             const w = canvas.width, h = canvas.height;
             ctx.clearRect(0, 0, w, h);
 
+            // Grid Lines & Labels
             ctx.strokeStyle = '#232d42'; ctx.lineWidth = 1; ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif';
             for (let val = 0; val <= 10; val += 2.5) {
                 let y = h - (val / 10.0) * (h - 20) - 10;
@@ -150,22 +160,25 @@
                 ctx.fillText(val + ' m/s²', 2, y + 3);
             }
 
+            // Yellow Warning Threshold (0.8 m/s²)
             let yYellow = h - (0.8 / 10.0) * (h - 20) - 10;
             ctx.strokeStyle = 'rgba(255, 193, 7, 0.4)'; ctx.setLineDash([4, 4]);
             ctx.beginPath(); ctx.moveTo(30, yYellow); ctx.lineTo(w, yYellow); ctx.stroke();
 
+            // Red Alert Threshold (1.8 m/s²)
             let yRed = h - (1.8 / 10.0) * (h - 20) - 10;
             ctx.strokeStyle = 'rgba(255, 77, 77, 0.5)';
             ctx.beginPath(); ctx.moveTo(30, yRed); ctx.lineTo(w, yRed); ctx.stroke();
             ctx.setLineDash([]);
 
+            // Plot Live Dynamic Waveform
             ctx.beginPath();
             let step = (w - 30) / (historyLength - 1);
             let currentPga = pgaData[pgaData.length - 1];
 
             for (let i = 0; i < historyLength; i++) {
                 let x = 30 + i * step;
-                let val = Math.min(pgaData[i], 10.0);
+                let val = Math.min(Math.max(pgaData[i], 0.0), 10.0);
                 let y = h - (val / 10.0) * (h - 20) - 10;
                 if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
@@ -176,42 +189,23 @@
             ctx.stroke();
         }
 
-        function triggerForegroundVibration(active) {
-            if (active && navigator.vibrate) {
-                if (!vibInterval) {
-                    navigator.vibrate([1000, 200, 1000, 200]);
-                    vibInterval = setInterval(() => {
-                        if (navigator.vibrate) navigator.vibrate([1000, 200, 1000, 200]);
-                    }, 2400);
-                }
-            } else {
-                if (vibInterval) {
-                    clearInterval(vibInterval);
-                    vibInterval = null;
-                }
-                if (navigator.vibrate) navigator.vibrate(0);
-            }
-        }
-
-        function triggerSystemNotification(source) {
-            if (Notification.permission === 'granted' && swRegistration) {
-                swRegistration.showNotification("🚨 EARTHQUAKE ALERT DETECTED!", {
-                    body: `Critical Shaking Triggered by ${source || 'Node 1 Sensors'}!`,
-                    icon: "https://cdn-icons-png.flaticon.com/512/564/564619.png",
-                    vibrate: [1000, 200, 1000, 200, 1000],
-                    tag: "earthquake-alert",
-                    renotify: true,
-                    requireInteraction: true
-                });
+        function triggerMobileVibration() {
+            if (vibrationUnlocked && navigator.vibrate) {
+                navigator.vibrate([400, 100, 400]);
             }
         }
 
         function processTelemetry(data) {
             if (!data) return;
 
-            let pga = parseFloat(data.pga || 0.0);
-            let alertActive = Boolean(data.a || data.vibration > 0 || pga > 1.8);
+            // Safe robust float parsing
+            let rawPga = data.pga !== undefined ? data.pga : 0;
+            let pga = parseFloat(rawPga);
+            if (isNaN(pga)) pga = 0.0;
 
+            let alertActive = Boolean(data.a || data.vibration > 0 || pga >= 0.4);
+
+            // Shift array and push new value to generate active wave
             pgaData.shift();
             pgaData.push(pga);
             drawWaveform();
@@ -228,39 +222,29 @@
                 document.getElementById('pga_level').innerText = "CRITICAL SHAKING";
                 document.getElementById('pga_level').style.color = '#ff4d4d';
                 impactZone.setStyle({ color: '#ff4d4d', fillColor: '#ff4d4d', fillOpacity: 0.45 }).setRadius(Math.min(30 + pga * 15, 120));
-
-                triggerForegroundVibration(true);
-
-                // Send background push notification on alert state transition
-                if (!lastAlertState) {
-                    triggerSystemNotification(data.source);
-                    lastAlertState = true;
-                }
-            } else if (pga >= 0.8) {
+                
+                triggerMobileVibration();
+            } else if (pga >= 0.2) {
                 banner.style.display = 'none';
                 document.getElementById('pga_val').style.color = '#ffc107';
                 document.getElementById('pga_level').innerText = "MILD TREMOR";
                 document.getElementById('pga_level').style.color = '#ffc107';
                 impactZone.setStyle({ color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.3 }).setRadius(40);
-                triggerForegroundVibration(false);
-                lastAlertState = false;
             } else {
                 banner.style.display = 'none';
                 document.getElementById('pga_val').style.color = '#00e676';
                 document.getElementById('pga_level').innerText = "Level 0: Normal / Calm";
                 document.getElementById('pga_level').style.color = '#94a3b8';
                 impactZone.setStyle({ color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2 }).setRadius(30);
-                triggerForegroundVibration(false);
-                lastAlertState = false;
             }
 
             if (data.weather) document.getElementById('weather_val').innerText = data.weather;
             if (data.desc) document.getElementById('weather_desc').innerText = data.desc;
         }
 
-        // Fast 100ms Event Fetch Loop
+        // Fast 100ms HTTP Polling Loop
         setInterval(() => {
-            fetch(FIREBASE_URL)
+            fetch(FIREBASE_URL + '?t=' + Date.now())
                 .then(r => r.json())
                 .then(d => processTelemetry(d))
                 .catch(e => console.error(e));
