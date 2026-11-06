@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Node 1 Seismic Transmitter & Weather Station</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #151c2c;
+            --card-border: #232d42;
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            --accent-green: #00e676;
+            --accent-yellow: #ffc107;
+            --accent-red: #ff4d4d;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 16px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 18px 24px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .header h2 { font-size: 22px; font-weight: 600; }
+        .alert-banner {
+            font-size: 18px; font-weight: 700; color: var(--accent-red);
+            padding: 6px 14px; border-radius: 6px; background: rgba(255, 77, 77, 0.15);
+            display: none; animation: pulse-alert 1s infinite alternate;
+        }
+        @keyframes pulse-alert { from { opacity: 0.6; } to { opacity: 1.0; } }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; width: 100%; }
+        .card {
+            background: var(--card-bg); border: 1px solid var(--card-border);
+            border-radius: 12px; padding: 20px; display: flex; flex-direction: column;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .card-title {
+            font-size: 16px; font-weight: 600; color: var(--text-muted);
+            margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;
+        }
+        #map { width: 100%; height: 100%; min-height: 380px; border-radius: 8px; border: 1px solid var(--card-border); z-index: 1; }
+        .chart-container {
+            position: relative; width: 100%; height: 240px; background: #0d121d;
+            border: 1px solid var(--card-border); border-radius: 8px; overflow: hidden;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        .metrics-row {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+            margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);
+        }
+        .metric-box { background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); padding: 14px; border-radius: 8px; text-align: center; }
+        .metric-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .metric-value { font-size: 26px; font-weight: 700; color: var(--accent-green); }
+        .metric-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; text-transform: capitalize; }
+        @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } #map { min-height: 300px; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>Field Transmitter Station (Node 1)</h2>
+        <div id="alert_banner" class="alert-banner"></div>
+    </div>
+    <div class="dashboard-grid">
+        <div class="card">
+            <div class="card-title">
+                <span>Live Epicenter Satellite Map</span>
+                <span id="map_coords" style="font-size:12px; color:var(--accent-green);">12.3041° N, 76.7111° E (VVIET)</span>
+            </div>
+            <div id="map"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">
+                <span>Seismic Intensity Waveform (PGA m/s²)</span>
+                <span id="live_pga_label" style="font-size:13px; font-weight:bold; color:var(--accent-green);">0.00 m/s²</span>
+            </div>
+            <div class="chart-container"><canvas id="waveformCanvas"></canvas></div>
+            <div class="metrics-row">
+                <div class="metric-box">
+                    <div class="metric-label">Peak Ground Acceleration</div>
+                    <div id="pga_val" class="metric-value">0.00 <span style="font-size:14px;">m/s²</span></div>
+                    <div id="pga_level" class="metric-sub">Level 0: Calm</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Current Weather</div>
+                    <div id="weather_val" class="metric-value">-- °C</div>
+                    <div id="weather_desc" class="metric-sub">Loading weather...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // REPLACE THIS URL WITH YOUR FIREBASE REALTIME DATABASE URL (WITH /telemetry.json AT THE END)
+        const FIREBASE_URL = "https://quakenode-dashboard-default-rtdb.firebaseio.com/telemetry.json";
+
+        const nodeLat = 12.304087, nodeLon = 76.711126;
+        const map = L.map('map').setView([nodeLat, nodeLon], 18);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
+        const impactZone = L.circle([nodeLat, nodeLon], { color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2, radius: 30 }).addTo(map);
+        L.circleMarker([nodeLat, nodeLon], { color: '#ffffff', fillColor: '#ff4d4d', fillOpacity: 1.0, radius: 7, weight: 2 }).addTo(map).bindTooltip("VVIET Node 1", { permanent: true });
+
+        const canvas = document.getElementById('waveformCanvas'), ctx = canvas.getContext('2d');
+        const historyLength = 100;
+        let pgaData = Array(historyLength).fill(0.0);
+
+        function resizeCanvas() { canvas.width = canvas.parentElement.clientWidth; canvas.height = canvas.parentElement.clientHeight; }
+        window.addEventListener('resize', resizeCanvas); resizeCanvas();
+
+        function drawWaveform() {
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = '#232d42'; ctx.lineWidth = 1; ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif';
+            for (let val = 0; val <= 10; val += 2.5) {
+                let y = h - (val / 10.0) * (h - 20) - 10;
+                ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(w, y); ctx.stroke();
+                ctx.fillText(val + ' m/s²', 2, y + 3);
+            }
+            let step = (w - 30) / (historyLength - 1), currentPga = pgaData[pgaData.length - 1];
+            ctx.beginPath();
+            for (let i = 0; i < historyLength; i++) {
+                let x = 30 + i * step, val = Math.min(pgaData[i], 10.0), y = h - (val / 10.0) * (h - 20) - 10;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = currentPga >= 1.8 ? '#ff4d4d' : (currentPga >= 0.8 ? '#ffc107' : '#00e676');
+            ctx.lineWidth = 2.5; ctx.stroke();
+        }
+
+        function fetchDataFromFirebase() {
+            fetch(FIREBASE_URL)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data) return;
+                    let pga = parseFloat(data.pga || 0.0);
+                    let alertActive = data.a || (pga > 1.8);
+
+                    pgaData.shift(); pgaData.push(pga); drawWaveform();
+                    document.getElementById('pga_val').innerText = pga.toFixed(2) + " m/s²";
+                    document.getElementById('live_pga_label').innerText = pga.toFixed(2) + " m/s²";
+
+                    const banner = document.getElementById('alert_banner');
+                    if (alertActive) {
+                        banner.style.display = 'block'; banner.innerText = `EARTHQUAKE ALERT! (${data.source || 'TREMOR DETECTED'})`;
+                        document.getElementById('pga_val').style.color = '#ff4d4d';
+                        document.getElementById('pga_level').innerText = "CRITICAL SHAKING";
+                        document.getElementById('pga_level').style.color = '#ff4d4d';
+                        impactZone.setStyle({ color: '#ff4d4d', fillColor: '#ff4d4d', fillOpacity: 0.45 }).setRadius(Math.min(30 + pga * 15, 120));
+                    } else if (pga >= 0.8) {
+                        banner.style.display = 'none';
+                        document.getElementById('pga_val').style.color = '#ffc107';
+                        document.getElementById('pga_level').innerText = "MILD TREMOR";
+                        document.getElementById('pga_level').style.color = '#ffc107';
+                        impactZone.setStyle({ color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.3 }).setRadius(40);
+                    } else {
+                        banner.style.display = 'none';
+                        document.getElementById('pga_val').style.color = '#00e676';
+                        document.getElementById('pga_level').innerText = "Level 0: Normal / Calm";
+                        document.getElementById('pga_level').style.color = '#94a3b8';
+                        impactZone.setStyle({ color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2 }).setRadius(30);
+                    }
+
+                    if (data.weather) document.getElementById('weather_val').innerText = data.weather;
+                    if (data.desc) document.getElementById('weather_desc').innerText = data.desc;
+                })
+                .catch(err => console.error("Cloud fetch error:", err));
+        }
+
+        // Poll Firebase every 300ms
+        setInterval(fetchDataFromFirebase, 300);
+    </script>
+</body>
+</html>
