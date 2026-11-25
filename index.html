@@ -127,7 +127,7 @@
         <div class="card" id="map_card">
             <div class="card-title">
                 <span>Live Epicenter & Safe Evacuation Map</span>
-                <span id="map_coords" style="font-size:11px; color:var(--accent-green);">12.3041° N, 76.7111° E</span>
+                <span id="map_coords" style="font-size:11px; color:var(--accent-green);">12.3959° N, 76.6579° E (MRIT)</span>
             </div>
             <div id="map"></div>
             <button id="evac_button" class="evac-btn" onclick="drawInPageEvacuationRoute()">
@@ -182,8 +182,11 @@
     <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
     <script>
         const FIREBASE_URL = "https://quakenode-dashboard-default-rtdb.firebaseio.com/telemetry.json";
-        const nodeLat = 12.304087, nodeLon = 76.711126;
-        const safeGroundLat = 12.304800, safeGroundLon = 76.712200;
+        
+        // Updated MRIT Coordinates
+        const nodeLat = 12.39594820495787, nodeLon = 76.65786799547469;
+        // Open Safe Ground Assembly Point at MRIT Campus
+        const safeGroundLat = 12.396550, safeGroundLon = 76.658450;
 
         // Map Initialization
         const map = L.map('map').setView([nodeLat, nodeLon], 18);
@@ -191,7 +194,7 @@
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
 
         const impactZone = L.circle([nodeLat, nodeLon], { color: '#00e676', fillColor: '#00e676', fillOpacity: 0.2, radius: 30 }).addTo(map);
-        L.circleMarker([nodeLat, nodeLon], { color: '#ffffff', fillColor: '#ff4d4d', fillOpacity: 1.0, radius: 7, weight: 2 }).addTo(map).bindTooltip("Node 1 Sensor", { permanent: true });
+        L.circleMarker([nodeLat, nodeLon], { color: '#ffffff', fillColor: '#ff4d4d', fillOpacity: 1.0, radius: 7, weight: 2 }).addTo(map).bindTooltip("MRIT Node 1 Sensor", { permanent: true });
         L.circleMarker([safeGroundLat, safeGroundLon], { color: '#00e676', fillColor: '#00e676', fillOpacity: 0.9, radius: 8, weight: 2 }).addTo(map).bindTooltip("🟢 Safe Open Assembly Ground", { permanent: true });
 
         let routingControl = null;
@@ -327,7 +330,6 @@
 
         function processTelemetry(incoming) {
             if (!incoming || typeof incoming !== 'object') return;
-            // Merge partial patch updates cleanly
             currentState = { ...currentState, ...incoming };
 
             let pga = parseFloat(currentState.pga);
@@ -336,10 +338,7 @@
             let vibVal = parseInt(currentState.vibration) || 0;
             let alertFlag = (currentState.a === true || currentState.a === "true" || currentState.a === 1);
 
-            // Trigger RED state if ANY threshold or flag is active
             let alertActive = alertFlag || vibVal > 0 || pga >= 0.3;
-
-            // If SW-420 triggered without MPU spike, give visual wave spike of 3.5
             let displayPga = (alertActive && pga < 0.3) ? 3.5 : pga;
 
             isRedState = alertActive;
