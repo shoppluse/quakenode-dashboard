@@ -130,7 +130,7 @@
                 <span id="map_coords" style="font-size:11px; color:var(--accent-green);">12.3041° N, 76.7111° E</span>
             </div>
             <div id="map"></div>
-            <button id="evac_button" class="evac-btn" onclick="drawInPageEvacuationRoute()">
+            <button id="evac_button" class="evac-btn" onclick="drawInPageEvacuationRoute(true)">
                 📍 SHOW IN-PAGE EVACUATION ROUTE TO SAFE GROUND
             </button>
         </div>
@@ -197,8 +197,8 @@
         let routingControl = null;
         let routeDrawn = false;
 
-        function drawInPageEvacuationRoute() {
-            if (routeDrawn) return;
+        function drawInPageEvacuationRoute(force = false) {
+            if (routeDrawn && !force) return;
             routeDrawn = true;
             if ("geolocation" in navigator) {
                 navigator.geolocation.getCurrentPosition(
@@ -327,7 +327,6 @@
 
         function processTelemetry(incoming) {
             if (!incoming || typeof incoming !== 'object') return;
-            // Merge partial patch updates cleanly
             currentState = { ...currentState, ...incoming };
 
             let pga = parseFloat(currentState.pga);
@@ -336,10 +335,7 @@
             let vibVal = parseInt(currentState.vibration) || 0;
             let alertFlag = (currentState.a === true || currentState.a === "true" || currentState.a === 1);
 
-            // Trigger RED state if ANY threshold or flag is active
             let alertActive = alertFlag || vibVal > 0 || pga >= 0.3;
-
-            // If SW-420 triggered without MPU spike, give visual wave spike of 3.5
             let displayPga = (alertActive && pga < 0.3) ? 3.5 : pga;
 
             isRedState = alertActive;
@@ -372,7 +368,7 @@
                 evacBtn.innerText = "🚨 EVACUATE NOW: FOLLOWING ROUTE TO SAFE GROUND";
 
                 pulseMobileMotor();
-                drawInPageEvacuationRoute();
+                drawInPageEvacuationRoute(false);
 
                 if (!lastLoggedAlertState) {
                     addHistoryRecord(displayPga, currentState.source);
@@ -396,13 +392,14 @@
 
                 if ("vibrate" in navigator) navigator.vibrate(0);
                 lastLoggedAlertState = false;
+                routeDrawn = false;
             }
 
             if (currentState.weather) document.getElementById('weather_val').innerText = currentState.weather;
             if (currentState.desc) document.getElementById('weather_desc').innerText = currentState.desc;
         }
 
-        // Hybrid Streaming (Handles both PUT and PATCH + 1s Health Sync)
+        // Hybrid Streaming (Handles root PUT, sub-path PATCH, and 1s Health Sync)
         let eventSource = null;
         function connectStream() {
             if (eventSource) eventSource.close();
@@ -416,7 +413,13 @@
             const handleSseMessage = (e) => {
                 try {
                     const parsed = JSON.parse(e.data);
-                    if (parsed && parsed.data) processTelemetry(parsed.data);
+                    if (!parsed || parsed.data === null || parsed.data === undefined) return;
+                    if (parsed.path === "/" && typeof parsed.data === "object") {
+                        processTelemetry(parsed.data);
+                    } else if (parsed.path && parsed.path.length > 1) {
+                        const key = parsed.path.replace("/", "");
+                        processTelemetry({ [key]: parsed.data });
+                    }
                 } catch (err) {}
             };
 
